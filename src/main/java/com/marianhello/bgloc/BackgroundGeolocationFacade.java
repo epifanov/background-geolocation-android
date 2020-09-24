@@ -42,6 +42,7 @@ import org.json.JSONException;
 import org.slf4j.event.Level;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.concurrent.TimeoutException;
 
@@ -51,11 +52,6 @@ public class BackgroundGeolocationFacade {
     public static final int SERVICE_STOPPED = 0;
     public static final int AUTHORIZATION_AUTHORIZED = 1;
     public static final int AUTHORIZATION_DENIED = 0;
-
-    public static final String[] PERMISSIONS = {
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION
-    };
 
     private boolean mServiceBroadcastReceiverRegistered = false;
     private boolean mLocationModeChangeReceiverRegistered = false;
@@ -215,7 +211,13 @@ public class BackgroundGeolocationFacade {
         logger.debug("Starting service");
 
         PermissionManager permissionManager = PermissionManager.getInstance(getContext());
-        permissionManager.checkPermissions(Arrays.asList(PERMISSIONS), new PermissionManager.PermissionRequestListener() {
+        ArrayList<String> permissions = new ArrayList<String>();
+        permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            permissions.add(Manifest.permission.ACTIVITY_RECOGNITION);
+        }
+        permissionManager.checkPermissions(permissions, new PermissionManager.PermissionRequestListener() {
             @Override
             public void onPermissionGranted() {
                 logger.info("User granted requested permissions");
@@ -409,7 +411,13 @@ public class BackgroundGeolocationFacade {
     }
 
     public boolean hasPermissions() {
-        return hasPermissions(getContext(), PERMISSIONS);
+        ArrayList<String> permissions = new ArrayList<String>();
+        permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            permissions.add(Manifest.permission.ACTIVITY_RECOGNITION);
+        }
+        return hasPermissions(getContext(), permissions.toArray(new String[0]));
     }
 
     public boolean locationServicesEnabled() throws PluginException {
