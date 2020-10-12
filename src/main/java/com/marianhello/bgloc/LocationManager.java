@@ -46,6 +46,7 @@ public class LocationManager {
         permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             permissions.add(Manifest.permission.ACTIVITY_RECOGNITION);
+            permissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
         }
         permissionManager.checkPermissions(permissions, new PermissionManager.PermissionRequestListener() {
             @Override
