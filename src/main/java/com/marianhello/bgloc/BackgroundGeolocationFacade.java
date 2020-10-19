@@ -3,6 +3,7 @@ package com.marianhello.bgloc;
 import android.Manifest;
 import android.accounts.Account;
 import android.annotation.TargetApi;
+import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -14,6 +15,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.provider.Settings.SettingNotFoundException;
+import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.text.TextUtils;
@@ -41,7 +43,6 @@ import com.marianhello.logging.UncaughtExceptionLogger;
 import org.json.JSONException;
 import org.slf4j.event.Level;
 
-import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.concurrent.TimeoutException;
@@ -51,6 +52,7 @@ public class BackgroundGeolocationFacade {
     public static final int SERVICE_STARTED = 1;
     public static final int SERVICE_STOPPED = 0;
     public static final int AUTHORIZATION_AUTHORIZED = 1;
+    public static final int AUTHORIZATION_AUTHORIZED_ONLY_FOREGROUND = 2;
     public static final int AUTHORIZATION_DENIED = 0;
 
     private boolean mServiceBroadcastReceiverRegistered = false;
@@ -59,6 +61,7 @@ public class BackgroundGeolocationFacade {
 
     private Config mConfig;
     private final Context mContext;
+    private final Activity mActivity;
     private final PluginDelegate mDelegate;
     private final LocationService mService;
 
@@ -66,7 +69,8 @@ public class BackgroundGeolocationFacade {
 
     private org.slf4j.Logger logger;
 
-    public BackgroundGeolocationFacade(Context context, PluginDelegate delegate) {
+    public BackgroundGeolocationFacade(Activity activity, Context context, PluginDelegate delegate) {
+        mActivity = activity;
         mContext = context;
         mDelegate = delegate;
         mService = new LocationServiceProxy(context);
@@ -208,34 +212,19 @@ public class BackgroundGeolocationFacade {
     }
 
     public void start() {
-        logger.debug("Starting service");
-
-        PermissionManager permissionManager = PermissionManager.getInstance(getContext());
-        ArrayList<String> permissions = new ArrayList<String>();
-        permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
-        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            permissions.add(Manifest.permission.ACTIVITY_RECOGNITION);
-            permissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
+      logger.debug("Starting service");
+      if (hasForegroundPermissions()) {
+        logger.info("User granted requested permissions");
+        // watch location mode changes
+        registerLocationModeChangeReceiver();
+        registerServiceBroadcast();
+        startBackgroundService();
+      } else {
+        logger.info("User denied requested permissions");
+        if (mDelegate != null) {
+          mDelegate.onAuthorizationChanged(BackgroundGeolocationFacade.AUTHORIZATION_DENIED);
         }
-        permissionManager.checkPermissions(permissions, new PermissionManager.PermissionRequestListener() {
-            @Override
-            public void onPermissionGranted() {
-                logger.info("User granted requested permissions");
-                // watch location mode changes
-                registerLocationModeChangeReceiver();
-                registerServiceBroadcast();
-                startBackgroundService();
-            }
-
-            @Override
-            public void onPermissionDenied() {
-                logger.info("User denied requested permissions");
-                if (mDelegate != null) {
-                    mDelegate.onAuthorizationChanged(BackgroundGeolocationFacade.AUTHORIZATION_DENIED);
-                }
-            }
-        });
+      }
     }
 
     public void stop() {
@@ -301,35 +290,36 @@ public class BackgroundGeolocationFacade {
     }
 
     public BackgroundLocation getCurrentLocation(int timeout, long maximumAge, boolean enableHighAccuracy) throws PluginException {
-        logger.info("Getting current location with timeout:{} maximumAge:{} enableHighAccuracy:{}", timeout, maximumAge, enableHighAccuracy);
+      logger.info("Getting current location with timeout:{} maximumAge:{} enableHighAccuracy:{}", timeout, maximumAge, enableHighAccuracy);
+
+      try {
+        if (!hasForegroundPermissions()) {
+          logger.warn("Getting current location failed due missing permissions");
+          throw new PluginException("Permission denied", 1); // PERMISSION_DENIED
+        }
 
         LocationManager locationManager = LocationManager.getInstance(getContext());
         Promise<Location> promise = locationManager.getCurrentLocation(timeout, maximumAge, enableHighAccuracy);
-        try {
-            promise.await();
-            Location location = promise.get();
-            if (location != null) {
-                return BackgroundLocation.fromLocation(location);
-            }
 
-            Throwable error = promise.getError();
-            if (error == null) {
-                throw new PluginException("Location not available", 2); // LOCATION_UNAVAILABLE
-            }
-            if (error instanceof LocationManager.PermissionDeniedException) {
-                logger.warn("Getting current location failed due missing permissions");
-                throw new PluginException("Permission denied", 1); // PERMISSION_DENIED
-            }
-            if (error instanceof TimeoutException) {
-                throw new PluginException("Location request timed out", 3); // TIME_OUT
-            }
-
-            throw new PluginException(error.getMessage(), 2); // LOCATION_UNAVAILABLE
-        } catch (InterruptedException e) {
-            logger.error("Interrupted while waiting location", e);
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while waiting location", e);
+        promise.await();
+        Location location = promise.get();
+        if (location != null) {
+          return BackgroundLocation.fromLocation(location);
         }
+
+        Throwable error = promise.getError();
+        if (error == null) {
+          throw new PluginException("Location not available", 2); // LOCATION_UNAVAILABLE
+        }
+        if (error instanceof TimeoutException) {
+          throw new PluginException("Location request timed out", 3); // TIME_OUT
+        }
+        throw new PluginException(error.getMessage(), 2); // LOCATION_UNAVAILABLE
+      } catch (InterruptedException e) {
+        logger.error("Interrupted while waiting location", e);
+        Thread.currentThread().interrupt();
+        throw new RuntimeException("Interrupted while waiting location", e);
+      }
     }
 
     public void switchMode(final int mode) {
@@ -408,18 +398,7 @@ public class BackgroundGeolocationFacade {
     }
 
     public int getAuthorizationStatus() {
-        return hasPermissions() ? AUTHORIZATION_AUTHORIZED : AUTHORIZATION_DENIED;
-    }
-
-    public boolean hasPermissions() {
-        ArrayList<String> permissions = new ArrayList<String>();
-        permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
-        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            permissions.add(Manifest.permission.ACTIVITY_RECOGNITION);
-            permissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
-        }
-        return hasPermissions(getContext(), permissions.toArray(new String[0]));
+        return hasForegroundPermissions() ? AUTHORIZATION_AUTHORIZED : AUTHORIZATION_DENIED;
     }
 
     public boolean locationServicesEnabled() throws PluginException {
@@ -492,6 +471,49 @@ public class BackgroundGeolocationFacade {
         intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
         intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
         context.startActivity(intent);
+    }
+
+    public boolean hasForegroundPermissions() {
+      ArrayList<String> permissions = new ArrayList<String>();
+      permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+      permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        permissions.add(Manifest.permission.ACTIVITY_RECOGNITION);
+      }
+
+      return hasPermissions(getContext(), permissions.toArray(new String[0]));
+    }
+
+    public boolean shouldShowRequestBackgroundLocationPermissionRational() {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) { return false; }
+      return ActivityCompat.shouldShowRequestPermissionRationale(
+        mActivity,
+        Manifest.permission.ACCESS_BACKGROUND_LOCATION
+      );
+    }
+
+    public boolean requestPermissions() {
+      PermissionManager permissionManager = PermissionManager.getInstance(getContext());
+      ArrayList<String> permissions = new ArrayList<String>();
+      permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+      permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        permissions.add(Manifest.permission.ACTIVITY_RECOGNITION);
+        permissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
+      }
+
+      permissionManager.checkPermissions(permissions, new PermissionManager.PermissionRequestListener() {
+        @Override
+        public void onPermissionGranted() {
+          logger.info("User granted requested permissions");
+        }
+
+        @Override
+        public void onPermissionDenied() {
+          logger.info("User denied requested permissions");
+        }
+      });
+      return true;
     }
 
     public static boolean hasPermissions(Context context, String[] permissions) {
