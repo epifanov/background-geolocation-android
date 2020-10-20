@@ -21,6 +21,7 @@ import android.support.v4.content.LocalBroadcastManager;
 import android.text.TextUtils;
 
 import com.github.jparkie.promise.Promise;
+import com.github.jparkie.promise.Promises;
 import com.intentfilter.androidpermissions.PermissionManager;
 import com.marianhello.bgloc.data.BackgroundActivity;
 import com.marianhello.bgloc.data.BackgroundLocation;
@@ -492,7 +493,8 @@ public class BackgroundGeolocationFacade {
       );
     }
 
-    public boolean requestPermissions() {
+    public Promise requestPermissions() {
+      final Promise<Boolean> promise = Promises.promise();
       PermissionManager permissionManager = PermissionManager.getInstance(getContext());
       ArrayList<String> permissions = new ArrayList<String>();
       permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
@@ -506,14 +508,16 @@ public class BackgroundGeolocationFacade {
         @Override
         public void onPermissionGranted() {
           logger.info("User granted requested permissions");
+          promise.set(true);
         }
 
         @Override
         public void onPermissionDenied() {
           logger.info("User denied requested permissions");
+          promise.set(false);
         }
       });
-      return true;
+      return promise;
     }
 
     public static boolean hasPermissions(Context context, String[] permissions) {
