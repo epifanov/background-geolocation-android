@@ -257,7 +257,7 @@ public class BackgroundGeolocationFacade {
         unregisterLocationModeChangeReceiver();
         unregisterServiceBroadcast();
 
-        if (getConfig().getStopOnTerminate()) {
+        if (getConfig().getStopOnTerminate() || !hasBackgroundPermission()) {
             stopBackgroundService();
         } else {
             mService.startHeadlessTask();
@@ -483,6 +483,12 @@ public class BackgroundGeolocationFacade {
       }
 
       return hasPermissions(getContext(), permissions.toArray(new String[0]));
+    }
+
+    public boolean hasBackgroundPermission() {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) { return true; }
+      final String[] backgroundPermission = { Manifest.permission.ACCESS_BACKGROUND_LOCATION };
+      return hasPermissions(getContext(), backgroundPermission);
     }
 
     public boolean shouldShowRequestBackgroundLocationPermissionRational() {
