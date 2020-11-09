@@ -1,6 +1,5 @@
 package com.marianhello.bgloc;
 
-import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.location.Criteria;
@@ -8,14 +7,9 @@ import android.location.Location;
 import android.location.LocationListener;
 import android.os.Bundle;
 import android.os.Looper;
-import android.os.Build;
 
 import com.github.jparkie.promise.Promise;
 import com.github.jparkie.promise.Promises;
-import com.intentfilter.androidpermissions.PermissionManager;
-
-import java.util.Arrays;
-import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -38,36 +32,18 @@ public class LocationManager {
     }
 
     public Promise<Location> getCurrentLocation(final int timeout, final long maximumAge, final boolean enableHighAccuracy) {
-        final Promise<Location> promise = Promises.promise();
+      final Promise<Location> promise = Promises.promise();
 
-        PermissionManager permissionManager = PermissionManager.getInstance(mContext);
-        ArrayList<String> permissions = new ArrayList<String>();
-        permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
-        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            permissions.add(Manifest.permission.ACTIVITY_RECOGNITION);
-            permissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
-        }
-        permissionManager.checkPermissions(permissions, new PermissionManager.PermissionRequestListener() {
-            @Override
-            public void onPermissionGranted() {
-                try {
-                    Location currentLocation = getCurrentLocationNoCheck(timeout, maximumAge, enableHighAccuracy);
-                    promise.set(currentLocation);
-                } catch (TimeoutException e) {
-                    promise.setError(e);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
+      try {
+        Location currentLocation = getCurrentLocationNoCheck(timeout, maximumAge, enableHighAccuracy);
+        promise.set(currentLocation);
+      } catch (TimeoutException e) {
+        promise.setError(e);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
 
-            @Override
-            public void onPermissionDenied() {
-                promise.setError(new PermissionDeniedException());
-            }
-        });
-
-        return promise;
+      return promise;
     }
 
     /**
